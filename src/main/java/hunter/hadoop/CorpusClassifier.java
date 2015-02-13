@@ -1,28 +1,21 @@
 package hunter.hadoop;
 
-import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
-import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
-import java.util.StringTokenizer;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Scanner;
-import java.net.URI;
+import java.util.*;
 
-/**
- * Created by hadoop on 2/8/15.
- */
+
 public class CorpusClassifier {
 
     /**
@@ -39,21 +32,21 @@ public class CorpusClassifier {
         private Text word = new Text();
 
         /**
-         * Intailizes partsOfSpeech and populates it
+         * Initializes partsOfSpeech and populates it
          * using distributed cache data.
          * @param context the mapper context
          */
         @Override
         public void setup(Context context) throws IOException,
                 InterruptedException{
-            Scanner sc = null;
+            Scanner sc;
 
             try {
                 localFiles = context.getLocalCacheFiles();
                 sc = new Scanner(new File(localFiles[0].toUri()));
             } catch (IOException e) {
                 System.out.println("IOException");
-                System.out.println(e);
+                System.out.println(e.getMessage());
                 System.out.println(localFiles[0]);
                 return;
             }
@@ -73,7 +66,14 @@ public class CorpusClassifier {
             }
         }
 
-
+        /**
+         * @param key     not actually used, required by mapreduce api.
+         * @param value   input text from the corpus being analyzed
+         * @param context the job context
+         * @throws IOException
+         * @throws InterruptedException Classifies every word in value the emits the relevant part of speech and a counter.
+         *                              If a word maps to multiple parts of speech this is done for each one.
+         */
         public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
             StringTokenizer itr = new StringTokenizer(value.toString());
             while (itr.hasMoreTokens()) {
@@ -89,9 +89,23 @@ public class CorpusClassifier {
         }
 
 
-
     }
 
+    public static class IntSumReducer
+            extends Reducer<Text, IntWritable, Text, IntWritable> {
+        private IntWritable result = new IntWritable();
+
+        public void reduce(Text key, Iterable<IntWritable> values,
+                           Context context
+        ) throws IOException, InterruptedException {
+            int sum = 0;
+            for (IntWritable val : values) {
+                sum += val.get();
+            }
+            result.set(sum);
+            context.write(key, result);
+        }
+    }
 
 
     public static void main(String[] args) throws Exception {
@@ -99,8 +113,8 @@ public class CorpusClassifier {
         Job job = Job.getInstance(conf, "corpus classifier");
         job.setJarByClass(CorpusClassifier.class);
         job.setMapperClass(PartsOfSpeechMapper.class);
-      //  job.setCombinerClass(IntSumReducer.class);
-      //  job.setReducerClass(IntSumReducer.class);
+        job.setCombinerClass(IntSumReducer.class);
+        job.setReducerClass(IntSumReducer.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(IntWritable.class);
         FileInputFormat.addInputPath(job, new Path(args[0]));
